@@ -1,115 +1,98 @@
-#!/usr/bin/env python3
-"""Serve a wall sign and a page to update its text over the local network.
-
-    /sign    the sign itself; refreshes itself every few seconds
-    /update  a text field and an Update button that change the sign
-
-Pages are plain HTML with no JavaScript so that old e-reader browsers
-(the Kindle experimental browser in particular) can render them.
-"""
-
+from flask import Flask, Response, render_template, request, redirect, url_for
+from pathlib import Path
 import argparse
-import html
 import socket
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from urllib.parse import parse_qs
 
-BASE_DIR = Path(__file__).resolve().parent
-STATE_FILE = BASE_DIR / "sign_text.txt"
+# Templates live next to this file rather than in templates/.
+app = Flask(__name__, template_folder=".")
+
+STATE_FILE = Path(__file__).resolve().parent / "sign_text.txt"
 DEFAULT_TEXT = "Hello"
-MAX_TEXT_BYTES = 4096
+KEEPALIVE_SECONDS = 15  # nudge idle SSE connections so proxies keep them open
 
-# The sign text, guarded because ThreadingHTTPServer handles requests
-# on multiple threads.
-_lock = threading.Lock()
+# The sign text. The condition wakes every open stream the moment it changes,
+# and _version lets a stream tell "changed" from "woke up for a keepalive".
+_cond = threading.Condition()
 _text = DEFAULT_TEXT
+_version = 0
 
 
 def load_text():
     """Restore the last sign text so a restart does not blank the sign."""
     global _text
     try:
-        saved = STATE_FILE.read_text(encoding="utf-8")
+        _text = STATE_FILE.read_text(encoding="utf-8")
     except OSError:
-        return
-    with _lock:
-        _text = saved
+        pass
 
 
 def get_text():
-    with _lock:
+    with _cond:
         return _text
 
 
 def set_text(new_text):
-    global _text
-    with _lock:
+    global _text, _version
+    with _cond:
         _text = new_text
+        _version += 1
+        _cond.notify_all()
     try:
         STATE_FILE.write_text(new_text, encoding="utf-8")
     except OSError:
         pass  # keep serving from memory if the file is not writable
 
 
-def render(template_name, text):
-    template = (BASE_DIR / template_name).read_text(encoding="utf-8")
-    return template.replace("{{text}}", html.escape(text))
+@app.route("/")
+@app.route("/sign")
+def sign():
+    # Rendered with the current text so the sign is right on load, even
+    # before (or without) the EventSource connecting.
+    return render_template("sign.html", text=get_text())
 
 
-class SignHandler(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
-    server_version = "SignServer/1.0"
-
-    def do_GET(self):
-        path = self.path.split("?", 1)[0].rstrip("/") or "/"
-        if path in ("/", "/sign"):
-            self.send_page(render("sign.html", get_text()))
-        elif path == "/update":
-            self.send_page(render("update.html", get_text()))
-        elif path == "/text":  # plain text, handy for scripting
-            self.send_page(get_text(), content_type="text/plain; charset=utf-8")
-        else:
-            self.send_error(404, "Not Found")
-
-    def do_POST(self):
-        path = self.path.split("?", 1)[0].rstrip("/") or "/"
-        if path != "/update":
-            self.send_error(404, "Not Found")
-            return
-
-        length = int(self.headers.get("Content-Length") or 0)
-        if length > MAX_TEXT_BYTES:
-            self.send_error(413, "Text too long")
-            return
-        body = self.rfile.read(length).decode("utf-8", errors="replace")
-        fields = parse_qs(body, keep_blank_values=True)
-        set_text(fields.get("text", [""])[0].strip())
-
+@app.route("/update", methods=["GET", "POST"])
+def update():
+    if request.method == "POST":
+        set_text(request.form.get("text", "").strip())
         # Redirect so a reload does not resubmit the form.
-        self.send_response(303)
-        self.send_header("Location", "/update")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
+        return redirect(url_for("update"))
+    return render_template("update.html", text=get_text())
 
-    def send_page(self, body, content_type="text/html; charset=utf-8"):
-        payload = body.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(payload)))
-        # E-reader browsers cache aggressively; the sign must not go stale.
-        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
-        self.send_header("Pragma", "no-cache")
-        self.send_header("Expires", "0")
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(payload)
 
-    do_HEAD = do_GET
+@app.route("/stream_text")
+def stream_text():
+    def event_stream():
+        last_seen = -1
+        while True:
+            with _cond:
+                if _version == last_seen:
+                    _cond.wait(timeout=KEEPALIVE_SECONDS)
+                text, version = _text, _version
+            if version == last_seen:
+                yield ": keepalive\n\n"
+            else:
+                last_seen = version
+                # A data: field cannot span lines; the sign is one line anyway.
+                yield "data: %s\n\n" % text.replace("\r", " ").replace("\n", " ")
 
-    def log_message(self, fmt, *args):
-        print("%s - %s" % (self.address_string(), fmt % args))
+    return Response(event_stream(), mimetype="text/event-stream")
+
+
+@app.route("/text")
+def text():
+    """Current text as plain text, handy for scripting."""
+    return Response(get_text(), mimetype="text/plain")
+
+
+@app.after_request
+def no_cache(response):
+    # E-reader browsers cache aggressively; the sign must not go stale.
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 def local_ip():
@@ -124,25 +107,15 @@ def local_ip():
         sock.close()
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Serve a wall sign on the LAN.")
     parser.add_argument("--host", default="0.0.0.0", help="address to bind")
-    parser.add_argument("--port", type=int, default=8000, help="port to bind")
+    parser.add_argument("--port", type=int, default=5000, help="port to bind")
     args = parser.parse_args()
 
     load_text()
-    server = ThreadingHTTPServer((args.host, args.port), SignHandler)
     ip = local_ip() if args.host == "0.0.0.0" else args.host
     print("Sign:   http://%s:%d/sign" % (ip, args.port))
     print("Update: http://%s:%d/update" % (ip, args.port))
-    print("Ctrl-C to stop.")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nStopping.")
-    finally:
-        server.server_close()
-
-
-if __name__ == "__main__":
-    main()
+    # debug=False: this listens on the LAN, and the debugger is a remote shell.
+    app.run(host=args.host, port=args.port, threaded=True, debug=False)

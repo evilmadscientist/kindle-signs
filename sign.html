@@ -2,7 +2,6 @@
 <html>
 	<head>
 		<meta charset="UTF-8">
-		<meta http-equiv="refresh" content="5">
 		<title>Live Text Sign</title>
 		<style>
 			body {
@@ -29,9 +28,22 @@
 	</head>
 	<body>
 		<!-- <div id="h1">H1 text, big</div> -->
-		<div id="h2">{{text}}</div>
+		<div id="h2">{{ text }}</div>
 		<!-- <div id="h3">H3 text, small</div> -->
 		<!-- Add lines to allow for scrolling -->
 		<p><br><br><br><br><br></p>
+
+		<script>
+			// The div already holds the current text; this keeps it live.
+			if (window.EventSource) {
+				var source = new EventSource("/stream_text");
+				source.onmessage = function (event) {
+					document.getElementById("h2").textContent = event.data;
+				};
+			} else {
+				// No EventSource (very old browser): fall back to reloading.
+				setTimeout(function () { window.location.reload(); }, 5000);
+			}
+		</script>
 	</body>
 </html>
