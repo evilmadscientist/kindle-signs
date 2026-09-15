@@ -8,6 +8,11 @@
 				font-family: Arial, sans-serif;
 				margin: 40px;
 			}
+			label {
+				display: block;
+				margin-top: 20px;
+				color: #555;
+			}
 			input[type=text] {
 				font-size: 1.5em;
 				width: 90%;
@@ -15,23 +20,26 @@
 			}
 			input[type=submit] {
 				font-size: 1.5em;
-				margin-top: 16px;
+				margin-top: 24px;
 				padding: 6px 24px;
-			}
-			.current {
-				margin-top: 32px;
-				color: #555;
 			}
 		</style>
 	</head>
 	<body>
 		<h1>Update Wall Sign</h1>
 		<form method="post" action="/update">
-			<input type="text" name="text" value="{{ text }}">
+			<label for="h1">Big line</label>
+			<input type="text" id="h1" name="h1" value="{{ h1 }}">
+
+			<label for="h2">Medium line</label>
+			<input type="text" id="h2" name="h2" value="{{ h2 }}">
+
+			<label for="h3">Small line</label>
+			<input type="text" id="h3" name="h3" value="{{ h3 }}">
+
 			<br>
 			<input type="submit" value="Update">
 		</form>
-		<p class="current">Currently showing: {{ text }}</p>
-		<p><a href="/sign">View the sign</a></p>
+		<p>Leave a line blank to hide it. <a href="/sign">View the sign</a></p>
 	</body>
 </html>

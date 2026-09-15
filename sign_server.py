@@ -1,45 +1,57 @@
 from flask import Flask, Response, render_template, request, redirect, url_for
 from pathlib import Path
 import argparse
+import json
 import socket
 import threading
 
 # Templates live next to this file rather than in templates/.
 app = Flask(__name__, template_folder=".")
 
-STATE_FILE = Path(__file__).resolve().parent / "sign_text.txt"
-DEFAULT_TEXT = "Hello"
+BASE_DIR = Path(__file__).resolve().parent
+STATE_FILE = BASE_DIR / "sign_text.json"
+LEGACY_STATE_FILE = BASE_DIR / "sign_text.txt"  # single-line state, pre-h1/h2/h3
+
+FIELDS = ("h1", "h2", "h3")  # big, medium, small
+DEFAULTS = {"h1": "Hello", "h2": "", "h3": ""}
 KEEPALIVE_SECONDS = 15  # nudge idle SSE connections so proxies keep them open
 
 # The sign text. The condition wakes every open stream the moment it changes,
 # and _version lets a stream tell "changed" from "woke up for a keepalive".
 _cond = threading.Condition()
-_text = DEFAULT_TEXT
+_state = dict(DEFAULTS)
 _version = 0
 
 
-def load_text():
+def load_state():
     """Restore the last sign text so a restart does not blank the sign."""
-    global _text
+    global _state
     try:
-        _text = STATE_FILE.read_text(encoding="utf-8")
-    except OSError:
-        pass
+        saved = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # Fall back to the old single-line file, which became the big line.
+        try:
+            _state["h1"] = LEGACY_STATE_FILE.read_text(encoding="utf-8")
+        except OSError:
+            pass
+        return
+    _state = {name: str(saved.get(name, DEFAULTS[name])) for name in FIELDS}
 
 
-def get_text():
+def get_state():
     with _cond:
-        return _text
+        return dict(_state)
 
 
-def set_text(new_text):
-    global _text, _version
+def set_state(new_state):
+    global _version
     with _cond:
-        _text = new_text
+        _state.update(new_state)
         _version += 1
         _cond.notify_all()
+        snapshot = dict(_state)
     try:
-        STATE_FILE.write_text(new_text, encoding="utf-8")
+        STATE_FILE.write_text(json.dumps(snapshot), encoding="utf-8")
     except OSError:
         pass  # keep serving from memory if the file is not writable
 
@@ -49,16 +61,17 @@ def set_text(new_text):
 def sign():
     # Rendered with the current text so the sign is right on load, even
     # before (or without) the EventSource connecting.
-    return render_template("sign.html", text=get_text())
+    return render_template("sign.html", **get_state())
 
 
 @app.route("/update", methods=["GET", "POST"])
 def update():
     if request.method == "POST":
-        set_text(request.form.get("text", "").strip())
+        # All three lines change together, from one click.
+        set_state({name: request.form.get(name, "").strip() for name in FIELDS})
         # Redirect so a reload does not resubmit the form.
         return redirect(url_for("update"))
-    return render_template("update.html", text=get_text())
+    return render_template("update.html", **get_state())
 
 
 @app.route("/stream_text")
@@ -69,21 +82,23 @@ def stream_text():
             with _cond:
                 if _version == last_seen:
                     _cond.wait(timeout=KEEPALIVE_SECONDS)
-                text, version = _text, _version
+                state, version = dict(_state), _version
             if version == last_seen:
                 yield ": keepalive\n\n"
             else:
                 last_seen = version
-                # A data: field cannot span lines; the sign is one line anyway.
-                yield "data: %s\n\n" % text.replace("\r", " ").replace("\n", " ")
+                # JSON keeps the three lines in one event, and escapes any
+                # newline that would otherwise break the data: field.
+                yield "data: %s\n\n" % json.dumps(state)
 
     return Response(event_stream(), mimetype="text/event-stream")
 
 
 @app.route("/text")
 def text():
-    """Current text as plain text, handy for scripting."""
-    return Response(get_text(), mimetype="text/plain")
+    """Current lines as plain text, one per line, handy for scripting."""
+    state = get_state()
+    return Response("\n".join(state[name] for name in FIELDS), mimetype="text/plain")
 
 
 @app.after_request
@@ -113,7 +128,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=5000, help="port to bind")
     args = parser.parse_args()
 
-    load_text()
+    load_state()
     ip = local_ip() if args.host == "0.0.0.0" else args.host
     print("Sign:   http://%s:%d/sign" % (ip, args.port))
     print("Update: http://%s:%d/update" % (ip, args.port))

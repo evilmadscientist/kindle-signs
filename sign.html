@@ -27,18 +27,28 @@
 
 	</head>
 	<body>
-		<!-- <div id="h1">H1 text, big</div> -->
-		<div id="h2">{{ text }}</div>
-		<!-- <div id="h3">H3 text, small</div> -->
+		<!-- A blank line is hidden so it leaves no gap on the sign. -->
+		<div id="h1"{% if not h1 %} style="display:none"{% endif %}>{{ h1 }}</div>
+		<div id="h2"{% if not h2 %} style="display:none"{% endif %}>{{ h2 }}</div>
+		<div id="h3"{% if not h3 %} style="display:none"{% endif %}>{{ h3 }}</div>
 		<!-- Add lines to allow for scrolling -->
 		<p><br><br><br><br><br></p>
 
 		<script>
-			// The div already holds the current text; this keeps it live.
+			// The divs already hold the current text; this keeps them live.
+			function setLine(id, value) {
+				var el = document.getElementById(id);
+				el.textContent = value;
+				el.style.display = value ? "" : "none";
+			}
+
 			if (window.EventSource) {
 				var source = new EventSource("/stream_text");
 				source.onmessage = function (event) {
-					document.getElementById("h2").textContent = event.data;
+					var lines = JSON.parse(event.data);
+					setLine("h1", lines.h1);
+					setLine("h2", lines.h2);
+					setLine("h3", lines.h3);
 				};
 			} else {
 				// No EventSource (very old browser): fall back to reloading.
