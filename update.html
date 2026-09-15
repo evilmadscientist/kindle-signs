@@ -2,11 +2,17 @@
 <html>
 	<head>
 		<meta charset="UTF-8">
+		<!-- Without this a phone lays the page out ~980px wide and zooms out. -->
+		<meta name="viewport" content="width=device-width, initial-scale=1">
 		<title> Update Wall Sign </title>
 		<style>
 			body {
 				font-family: Arial, sans-serif;
 				margin: 40px;
+				max-width: 700px;
+			}
+			h1 {
+				font-size: 1.8em;
 			}
 			label {
 				display: block;
@@ -14,14 +20,40 @@
 				color: #555;
 			}
 			input[type=text] {
-				font-size: 1.5em;
-				width: 90%;
-				padding: 6px;
+				font-size: 1.3em;
+				width: 100%;
+				max-width: 480px;
+				padding: 8px;
+				/* Count the padding inside the width, so 100% really fits. */
+				box-sizing: border-box;
 			}
 			input[type=submit] {
 				font-size: 1.5em;
 				margin-top: 24px;
-				padding: 6px 24px;
+				padding: 10px 28px;
+			}
+
+			/* Phones: tighter margins, narrower boxes, thumb-sized button. */
+			@media (max-width: 600px) {
+				body {
+					margin: 16px;
+				}
+				h1 {
+					font-size: 1.4em;
+				}
+				label {
+					margin-top: 16px;
+				}
+				input[type=text] {
+					/* Stays >=16px so iOS does not zoom in on focus. */
+					font-size: 1.1em;
+					max-width: 100%;
+					padding: 10px;
+				}
+				input[type=submit] {
+					width: 100%;
+					padding: 14px;
+				}
 			}
 		</style>
 	</head>
