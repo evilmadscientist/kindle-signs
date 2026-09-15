@@ -13,6 +13,7 @@ STATE_FILE = BASE_DIR / "sign_text.json"
 LEGACY_STATE_FILE = BASE_DIR / "sign_text.txt"  # single-line state, pre-h1/h2/h3
 
 FIELDS = ("h1", "h2", "h3")  # big, medium, small
+DEFAULT_PORT = 5000
 DEFAULTS = {"h1": "Hello", "h2": "", "h3": ""}
 KEEPALIVE_SECONDS = 15  # nudge idle SSE connections so proxies keep them open
 
@@ -55,13 +56,32 @@ def set_state(new_state):
     except OSError:
         pass  # keep serving from memory if the file is not writable
 
+def local_ip():
+    """Best guess at the address other devices on the LAN should use."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("8.8.8.8", 80))  # no packets sent, just picks a route
+        return sock.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        sock.close()
+
+
+def server_address(port=DEFAULT_PORT):
+    """host:port a phone on the LAN should use to reach this server."""
+    return "%s:%d" % (local_ip(), port)
+
+
+ADDRESS = server_address()
+
 
 @app.route("/")
 @app.route("/sign")
 def sign():
     # Rendered with the current text so the sign is right on load, even
     # before (or without) the EventSource connecting.
-    return render_template("sign.html", **get_state())
+    return render_template("sign.html", address=ADDRESS, **get_state())
 
 
 @app.route("/update", methods=["GET", "POST"])
@@ -110,25 +130,16 @@ def no_cache(response):
     return response
 
 
-def local_ip():
-    """Best guess at the address other devices on the LAN should use."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        sock.connect(("8.8.8.8", 80))  # no packets sent, just picks a route
-        return sock.getsockname()[0]
-    except OSError:
-        return "127.0.0.1"
-    finally:
-        sock.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Serve a wall sign on the LAN.")
     parser.add_argument("--host", default="0.0.0.0", help="address to bind")
-    parser.add_argument("--port", type=int, default=5000, help="port to bind")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="port to bind")
     args = parser.parse_args()
 
     load_state()
+    ADDRESS = server_address(args.port)
     ip = local_ip() if args.host == "0.0.0.0" else args.host
     print("Sign:   http://%s:%d/sign" % (ip, args.port))
     print("Update: http://%s:%d/update" % (ip, args.port))

@@ -23,6 +23,19 @@
 				font-size: 1em;
 				margin-top: 20px;
 			}
+			/* Where to go to change the sign. Fixed elements shrink to fit
+			   their text, so the box is exactly as wide as the address. */
+			#address {
+				position: fixed;
+				right: 8px;
+				bottom: 8px;
+				z-index: 9999;
+				background: #fff;
+				border: 1px solid #888888;
+				color: #888888;
+				padding: 4px 8px;
+				font-size: 0.7em;
+			}
 		</style>
 
 	</head>
@@ -33,6 +46,8 @@
 		<div id="h3"{% if not h3 %} style="display:none"{% endif %}>{{ h3 }}</div>
 		<!-- Add lines to allow for scrolling -->
 		<p><br><br><br><br><br></p>
+
+		<div id="address">{{ address }}</div>
 
 		<script>
 			// The divs already hold the current text; this keeps them live.
