@@ -1,7 +1,37 @@
+<!DOCTYPE html>
 <html>
-<head>
-<title> Update Wall Sign </title>
-</head>
-<body>
-</body>
+	<head>
+		<meta charset="UTF-8">
+		<title> Update Wall Sign </title>
+		<style>
+			body {
+				font-family: Arial, sans-serif;
+				margin: 40px;
+			}
+			input[type=text] {
+				font-size: 1.5em;
+				width: 90%;
+				padding: 6px;
+			}
+			input[type=submit] {
+				font-size: 1.5em;
+				margin-top: 16px;
+				padding: 6px 24px;
+			}
+			.current {
+				margin-top: 32px;
+				color: #555;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>Update Wall Sign</h1>
+		<form method="post" action="/update">
+			<input type="text" name="text" value="{{text}}">
+			<br>
+			<input type="submit" value="Update">
+		</form>
+		<p class="current">Currently showing: {{text}}</p>
+		<p><a href="/sign">View the sign</a></p>
+	</body>
 </html>
